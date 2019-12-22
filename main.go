@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"net/http"
+	"strings"
 
 	"github.com/TakeruTakeru/auth-sample/dao"
 	"github.com/dgrijalva/jwt-go"
@@ -55,13 +57,61 @@ func singupHandler(w http.ResponseWriter, r *http.Request) {
 
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var user dao.User
+	var res []dao.User
 	json.NewDecoder(r.Body).Decode(&user)
-	token, err := createToken(&user)
+	noneHashedPass := user.Pass
+	err := user.GetEmailAndPassByEmail(&res)
 	if err != nil {
-		fmt.Print(err)
+		fmt.Fprintf(w, "1: %s", err.Error())
 		return
 	}
-	fmt.Fprintln(w, token)
+	resultNum := len(res)
+	if resultNum > 1 {
+		fmt.Fprintf(w, "Problem occured.")
+		return
+	}
+	if resultNum == 0 {
+		fmt.Fprintf(w, "No users matched.")
+		return
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(res[0].Pass), []byte(noneHashedPass))
+	if err != nil {
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+	token, err := createToken(&user)
+	if err != nil {
+		fmt.Fprintf(w, err.Error())
+		return
+	}
+	fmt.Fprint(w, token)
+}
+
+func verifyHandler(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	bearerToken := strings.Split(authHeader, " ")
+	fmt.Println(bearerToken)
+	if len(bearerToken) == 2 {
+		token, err := jwt.Parse(bearerToken[1], func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, errors.New("エラーです")
+			}
+			return []byte("hogehoge123"), nil
+		})
+		if err != nil {
+			fmt.Fprintf(w, "%+v", errors.WithStack(err))
+		}
+
+		if token.Valid {
+			fmt.Fprintf(w, "ok")
+		} else {
+			fmt.Fprintf(w, err.Error())
+			return
+		}
+	} else {
+		fmt.Fprintf(w, "Invalid request")
+		return
+	}
 }
 
 func main() {
@@ -69,6 +119,7 @@ func main() {
 	http.HandleFunc("/mysql/test", mysqlHandler)
 	http.HandleFunc("/signup", singupHandler)
 	http.HandleFunc("/login", loginHandler)
+	http.HandleFunc("/verify", verifyHandler)
 	http.ListenAndServe(":8080", nil)
 }
 

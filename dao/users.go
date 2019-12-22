@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	SELECT_ALL = "SELECT * FROM users"
-	INSERT     = "INSERT INTO users(username, email, password) VALUES(?,?,?)"
+	SELECT_ALL                   = "SELECT * FROM users"
+	SELECT_EMAIL_PASS_WITH_EMAIL = "SELECT email, password FROM users WHERE email='%s'"
+	INSERT                       = "INSERT INTO users(username, email, password) VALUES(?,?,?)"
 )
 
 type User struct {
@@ -44,7 +45,7 @@ func (u *User) InsertSelf() (res bool, err error) {
 	return
 }
 
-func (u *User) executeQuery(q string, result *[]User) (err error) {
+func (u *User) executeQuery(q string, result *[]User, setter func(result *sql.Rows, user *User) error) (err error) {
 	var user User
 	client := u.getconnection()
 	results, err := client.Query(q)
@@ -56,17 +57,25 @@ func (u *User) executeQuery(q string, result *[]User) (err error) {
 	defer results.Close()
 
 	for results.Next() {
-		err = results.Scan(&user.Id, &user.Name, &user.Email, &user.Pass)
+		err = setter(results, &user)
+		// err = results.Scan(&user.Id, &user.Name, &user.Email, &user.Pass)
 		if err != nil {
 			return
 		}
-		fmt.Println(len(buf), cap(buf))
 		buf = append(buf, user)
 	}
 	*result = buf
 	return
 }
 
+func (u *User) GetEmailAndPassByEmail(result *[]User) (err error) {
+	return u.executeQuery(fmt.Sprintf(SELECT_EMAIL_PASS_WITH_EMAIL, u.Email), result, func(results *sql.Rows, user *User) error {
+		return results.Scan(&user.Email, &user.Pass)
+	})
+}
+
 func (u *User) GetAllUsers(result *[]User) (err error) {
-	return u.executeQuery(SELECT_ALL, result)
+	return u.executeQuery(SELECT_ALL, result, func(results *sql.Rows, user *User) error {
+		return results.Scan(&user.Id, &user.Name, &user.Email, &user.Pass)
+	})
 }
